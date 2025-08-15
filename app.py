@@ -100,6 +100,7 @@ app_ui = ui.page_fluid(
             ui.input_text("new_code", "New code name"),
             ui.input_action_button("add_code", "Add code", class_="btn-primary"),
             ui.input_action_button("refresh_codes", "Refresh Codes", class_="btn-info"),
+            ui.input_action_button("test_db", "Test DB Direct", class_="btn-warning"),
             ui.output_text("code_status"),
             ui.tags.hr(),
             ui.output_ui("code_select"),
@@ -146,14 +147,25 @@ def server(input, output, session):
     def code_select():
         """Render the code selection dropdown reactively"""
         codes = codes_list.get()
-        print(f"DEBUG: Rendering dropdown with {len(codes)} codes")  # Debug
+        print(f"DEBUG: code_select() called - codes_list has {len(codes)} items")
+        
+        # Let's also check what's actually in codes_list
+        print(f"DEBUG: codes_list contents: {codes}")
         
         if not codes:
+            print("DEBUG: No codes found, showing placeholder")
             choices = [{"label": "No codes available", "value": ""}]
         else:
-            choices = [{"label": c["name"], "value": str(c["id"])} for c in codes]
-            print(f"DEBUG: Choices = {choices}")  # Debug
+            choices = []
+            for i, c in enumerate(codes):
+                print(f"DEBUG: Processing code {i}: {c}")
+                # Be more defensive about the data structure
+                name = str(c.get("name", f"Code {i}"))
+                code_id = str(c.get("id", ""))
+                choices.append({"label": name, "value": code_id})
+                print(f"DEBUG: Added choice: {name} -> {code_id}")
             
+        print(f"DEBUG: Final choices for dropdown: {choices}")
         return ui.input_select("code", "Apply code", choices=choices)
 
     @reactive.effect
@@ -165,7 +177,9 @@ def server(input, output, session):
     @reactive.effect
     def _init():
         """Initialize the app"""
-        refresh_codes()
+        print("DEBUG: Initializing app...")
+        codes = refresh_codes()
+        print(f"DEBUG: Initial load found {len(codes)} codes")
 
     @output
     @render.text
@@ -282,15 +296,27 @@ def server(input, output, session):
             print(traceback.format_exc())
 
     @reactive.effect
-    @reactive.event(input.refresh_codes)
-    def _manual_refresh():
-        """Manual refresh of codes for debugging"""
-        code_status_message.set("Manually refreshing codes...")
+    @reactive.event(input.test_db)
+    def _test_db_direct():
+        """Test database directly"""
+        code_status_message.set("Testing database directly...")
         try:
-            codes = refresh_codes()
-            code_status_message.set(f"Manual refresh: Found {len(codes)} codes")
+            # Test the database connection and query directly
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT COUNT(*) FROM codes")).scalar()
+                code_status_message.set(f"Direct DB test: Found {result} codes in database")
+                
+                # Get the actual codes
+                result = conn.execute(text("SELECT id, name FROM codes ORDER BY name")).fetchall()
+                codes_info = [f"{row.name} (ID: {row.id})" for row in result]
+                print(f"DEBUG: Direct DB query results: {codes_info}")
+                code_status_message.set(f"Direct codes: {', '.join(codes_info) if codes_info else 'None found'}")
+                
         except Exception as e:
-            code_status_message.set(f"Manual refresh failed: {e}")
+            code_status_message.set(f"Direct DB test failed: {e}")
+            import traceback
+            print(traceback.format_exc())
 
     @reactive.effect
     @reactive.event(input.file)
