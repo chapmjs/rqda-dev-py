@@ -155,7 +155,7 @@ app_ui = ui.page_fluid(
     ui.layout_sidebar(
         ui.sidebar(
             ui.input_file("file", "Upload a .txt file", accept=[".txt"]),
-            ui.tags.div({"id": "file_info", "style": "font-size: 0.8em; color: #666; margin-bottom: 1rem;"}),
+            ui.output_ui("file_info_display"),
             ui.input_text("new_code", "New code name"),
             ui.input_action_button("add_code", "Add code", class_="btn-primary"),
             ui.input_select("code", "Apply code", choices=[]),
@@ -163,61 +163,13 @@ app_ui = ui.page_fluid(
             ui.tags.hr(),
             ui.input_text("open_filename", "Reload by filename (exact)"),
             ui.input_action_button("open", "Open document", class_="btn-secondary"),
-            ui.tags.div({"id": "status", "style": "margin-top: 1rem; padding: 0.5rem; display: none;"})
+            ui.output_ui("status_display")
         ),
-        ui.tags.div({"id": "docview", "style": "white-space:pre-wrap; border:1px solid #ddd; padding:1rem; min-height:300px; max-height:600px; overflow-y:auto;"}),
-        ui.tags.div({"id": "selinfo", "style": "margin-top:0.5rem; color:#666;"}),
-        ui.tags.div({"id": "docinfo", "style": "margin-top:0.5rem; font-size: 0.8em; color: #888;"})
+        ui.output_ui("docview"),
+        ui.output_ui("selinfo"),
+        ui.output_ui("docinfo")
     ),
-    # Enhanced JS: better selection handling and user feedback
-    ui.tags.script("""
-      (function(){
-        const box = document.getElementById('docview');
-        const statusDiv = document.getElementById('status');
-        
-        function showStatus(message, type = 'info') {
-          statusDiv.innerText = message;
-          statusDiv.className = type === 'error' ? 'alert alert-danger' : 'alert alert-info';
-          statusDiv.style.display = 'block';
-          setTimeout(() => {
-            statusDiv.style.display = 'none';
-          }, 3000);
-        }
-        
-        function getSelectionIn(el) {
-          const sel = window.getSelection();
-          if (!sel || sel.isCollapsed) return null;
-          
-          // Check if selection is within our element
-          if (!el.contains(sel.anchorNode) || !el.contains(sel.focusNode)) return null;
-          
-          const range = sel.getRangeAt(0);
-          const preSelectionRange = range.cloneRange();
-          preSelectionRange.selectNodeContents(el);
-          preSelectionRange.setEnd(range.startContainer, range.startOffset);
-          
-          const selected = sel.toString().trim();
-          if (!selected) return null;
-          
-          // Calculate actual text offset (not HTML offset)
-          const textBefore = preSelectionRange.toString();
-          const start = textBefore.length;
-          const end = start + selected.length;
-          
-          return { start: start, end: end, text: selected };
-        }
-        
-        document.addEventListener('mouseup', () => {
-          const payload = getSelectionIn(box);
-          if (payload && payload.text.length > 0) {
-            Shiny.setInputValue('selection', payload, {priority: 'event'});
-          }
-        });
-        
-        // Expose showStatus for use from Python
-        window.showStatus = showStatus;
-      })();
-    """)
+    # Remove the old JavaScript - now handled by reactive outputs
 )
 
 #
@@ -230,15 +182,167 @@ def server(input, output, session: shiny_session.Session):
 
     def show_status(message: str, type_: str = "info"):
         """Show status message to user"""
-        escaped_msg = html.escape(str(message))
-        session.run_js(f"window.showStatus('{escaped_msg}', '{type_}');")
+        status_message.set(str(message))
+        status_type.set(type_)
+
+    @output
+    @render.ui
+    def status_display():
+        """Render status messages"""
+        msg = status_message.get()
+        msg_type = status_type.get()
+        if not msg:
+            return ui.div()
+        
+        alert_class = "alert-danger" if msg_type == "error" else "alert-info"
+        return ui.div(
+            msg,
+            class_=f"alert {alert_class}",
+            style="margin-top: 1rem;"
+        )
 
     def refresh_codes():
         try:
             opts = [{"label": c["name"], "value": str(c["id"])} for c in list_codes(engine)]
-            session.send_input_message("code", {"options": opts})
+            ui.update_select("code", choices=opts)
         except Exception as e:
             show_status(f"Error loading codes: {str(e)}", "error")
+
+    @output
+    @render.ui
+    def docview():
+        """Render document with highlighting"""
+        doc_id = current_doc_id.get()
+        text = current_text.get()
+        
+        if not doc_id or not text:
+            return ui.div(
+                "No document loaded",
+                style="white-space:pre-wrap; border:1px solid #ddd; padding:1rem; min-height:300px; color:#666;"
+            )
+            
+        try:
+            segments = list_segments(engine, int(doc_id))
+            html_content = highlight_text(text, segments)
+            
+            return ui.HTML(f"""
+                <div id="docview" style="white-space:pre-wrap; border:1px solid #ddd; padding:1rem; min-height:300px; max-height:600px; overflow-y:auto; user-select:text;">
+                    {html_content}
+                </div>
+                <script>
+                (function() {{
+                    const box = document.getElementById('docview');
+                    if (!box) return;
+                    
+                    function getTextOffset(container, node, offset) {{
+                        let textOffset = 0;
+                        let walker = document.createTreeWalker(
+                            container,
+                            NodeFilter.SHOW_TEXT,
+                            null,
+                            false
+                        );
+                        
+                        let currentNode;
+                        while (currentNode = walker.nextNode()) {{
+                            if (currentNode === node) {{
+                                return textOffset + offset;
+                            }}
+                            textOffset += currentNode.textContent.length;
+                        }}
+                        return textOffset;
+                    }}
+                    
+                    function getSelection() {{
+                        const sel = window.getSelection();
+                        if (!sel || sel.isCollapsed) return null;
+                        if (!box.contains(sel.anchorNode) || !box.contains(sel.focusNode)) return null;
+                        
+                        const startOffset = getTextOffset(box, sel.anchorNode, sel.anchorOffset);
+                        const endOffset = getTextOffset(box, sel.focusNode, sel.focusOffset);
+                        const start = Math.min(startOffset, endOffset);
+                        const end = Math.max(startOffset, endOffset);
+                        const text = sel.toString();
+                        
+                        if (!text.trim()) return null;
+                        return {{ start: start, end: end, text: text }};
+                    }}
+                    
+                    box.addEventListener('mouseup', function() {{
+                        const selection = getSelection();
+                        if (selection) {{
+                            Shiny.setInputValue('text_selection', selection, {{priority: 'event'}});
+                        }}
+                    }});
+                }})();
+                </script>
+            """)
+            
+        except Exception as e:
+            return ui.div(
+                f"Error loading document: {str(e)}",
+                style="white-space:pre-wrap; border:1px solid #ddd; padding:1rem; min-height:300px; color:red;"
+            )
+
+    @output 
+    @render.ui
+    def selinfo():
+        """Show selection information"""
+        sel = input.text_selection()
+        if sel:
+            current_selection.set(sel)
+            return ui.div(
+                f"Selected: {sel['start']}–{sel['end']} ({len(sel['text'])} chars)",
+                style="margin-top:0.5rem; color:#666;"
+            )
+        return ui.div(style="margin-top:0.5rem;")
+
+    @output
+    @render.ui 
+    def docinfo():
+        """Show document information"""
+        metadata = current_metadata.get()
+        doc_id = current_doc_id.get()
+        
+        if not doc_id:
+            return ui.div()
+            
+        try:
+            segments = list_segments(engine, int(doc_id))
+            info_parts = []
+            
+            if metadata.get('char_count'):
+                info_parts.append(f"Document: {metadata['char_count']:,} characters")
+            if len(segments) > 0:
+                info_parts.append(f"{len(segments)} coded segment(s)")
+            if metadata.get('is_preview'):
+                info_parts.append("(Preview mode - full document in database)")
+                
+            info_text = " | ".join(info_parts)
+            return ui.div(
+                info_text,
+                style="margin-top:0.5rem; font-size: 0.8em; color: #888;"
+            )
+        except:
+            return ui.div()
+
+    @output
+    @render.ui
+    def file_info_display():
+        """Display file information"""
+        metadata = current_metadata.get()
+        if not metadata:
+            return ui.div()
+            
+        return ui.div(
+            ui.HTML(f"""
+                <strong>Size:</strong> {metadata.get('size_bytes', 0):,} bytes<br>
+                <strong>Encoding:</strong> {metadata.get('encoding', 'unknown')}<br>
+                <strong>Lines:</strong> {metadata.get('line_count', 0):,}<br>
+                <strong>Characters:</strong> {metadata.get('char_count', 0):,}
+            """),
+            style="font-size: 0.8em; color: #666; margin-bottom: 1rem;"
+        )
 
     @reactive.effect
     def _init():
@@ -258,7 +362,7 @@ def server(input, output, session: shiny_session.Session):
                 
             create_code(engine, name)
             refresh_codes()
-            session.send_input_message("new_code", {"value": ""})
+            ui.update_text("new_code", value="")
             show_status(f"Code '{name}' created successfully")
         except Exception as e:
             show_status(f"Error creating code: {str(e)}", "error")
@@ -274,29 +378,14 @@ def server(input, output, session: shiny_session.Session):
             file_path = Path(f[0]["datapath"])
             filename = secure_filename(f[0]["name"])
             
-            # Show loading message
-            session.run_js("document.getElementById('docview').innerHTML = '<em>Processing file...</em>';")
-            
             # Read and process file
             text, metadata = sniff_text(file_path, filename)
-            
-            # Update file info display
-            info_html = f"""
-            <strong>File:</strong> {html.escape(filename)}<br>
-            <strong>Size:</strong> {metadata['size_bytes']:,} bytes<br>
-            <strong>Encoding:</strong> {metadata['encoding']}<br>
-            <strong>Lines:</strong> {metadata['line_count']:,}<br>
-            <strong>Characters:</strong> {metadata['char_count']:,}
-            """
-            session.run_js(f"document.getElementById('file_info').innerHTML = {info_html!r};")
             
             # Save to database
             doc_id = upsert_document(engine, filename, text)
             current_doc_id.set(doc_id)
             current_text.set(text)
             current_metadata.set(metadata)
-            
-            _render()
             show_status(f"File '{filename}' uploaded successfully")
             
         except Exception as e:
@@ -328,15 +417,12 @@ def server(input, output, session: shiny_session.Session):
                 }
                 current_metadata.set(metadata)
                 
-                _render()
-                
                 if is_preview:
                     show_status("Large document - showing preview only")
                 else:
                     show_status(f"Document '{name}' loaded successfully")
             else:
                 show_status(f"Document '{name}' not found", "error")
-                session.run_js(f"document.getElementById('docview').innerText = 'Not found: {html.escape(name)}';")
                 
         except Exception as e:
             show_status(f"Error opening document: {str(e)}", "error")
@@ -345,7 +431,7 @@ def server(input, output, session: shiny_session.Session):
     @reactive.event(input.apply)
     def _apply_code():
         try:
-            sel = input.selection()
+            sel = current_selection.get() or input.text_selection()
             code_id = input.code()
             doc_id = current_doc_id.get()
             
@@ -371,48 +457,12 @@ def server(input, output, session: shiny_session.Session):
                 return
                 
             insert_segment(engine, int(doc_id), int(code_id), start, end, sel["text"])
-            _render()  # re-highlight
             show_status(f"Code applied to selected text ({len(sel['text'])} chars)")
             
         except Exception as e:
             show_status(f"Error applying code: {str(e)}", "error")
 
-    def _render():
-        try:
-            doc_id = current_doc_id.get()
-            text = current_text.get()
-            metadata = current_metadata.get()
-            
-            if not doc_id or not text:
-                return
-                
-            # Get segments and build HTML
-            segments = list_segments(engine, int(doc_id))
-            html_content = highlight_text(text, segments)
-            session.run_js(f"document.getElementById('docview').innerHTML = {html_content!r};")
-            
-            # Update document info
-            info_parts = []
-            if metadata.get('char_count'):
-                info_parts.append(f"Document: {metadata['char_count']:,} characters")
-            if len(segments) > 0:
-                info_parts.append(f"{len(segments)} coded segment(s)")
-            if metadata.get('is_preview'):
-                info_parts.append("(Preview mode - full document in database)")
-                
-            info_text = " | ".join(info_parts)
-            session.run_js(f"document.getElementById('docinfo').innerText = {info_text!r};")
-            
-            # Show selection info
-            sel = input.selection()
-            if sel:
-                sel_info = f"Selected: {sel['start']}–{sel['end']} ({len(sel['text'])} chars)"
-                session.run_js(f"document.getElementById('selinfo').innerText = {sel_info!r};")
-            else:
-                session.run_js("document.getElementById('selinfo').innerText = '';")
-                
-        except Exception as e:
-            show_status(f"Error rendering document: {str(e)}", "error")
+    # Remove the old _render function and JavaScript - everything is now handled by reactive outputs
 
 app = App(app_ui, server)
 
