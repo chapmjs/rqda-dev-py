@@ -99,6 +99,7 @@ app_ui = ui.page_fluid(
             ui.tags.hr(),
             ui.input_text("new_code", "New code name"),
             ui.input_action_button("add_code", "Add code", class_="btn-primary"),
+            ui.input_action_button("refresh_codes", "Refresh Codes", class_="btn-info"),
             ui.output_text("code_status"),
             ui.tags.hr(),
             ui.output_ui("code_select"),
@@ -279,6 +280,17 @@ def server(input, output, session):
             import traceback
             print("Full traceback:")
             print(traceback.format_exc())
+
+    @reactive.effect
+    @reactive.event(input.refresh_codes)
+    def _manual_refresh():
+        """Manual refresh of codes for debugging"""
+        code_status_message.set("Manually refreshing codes...")
+        try:
+            codes = refresh_codes()
+            code_status_message.set(f"Manual refresh: Found {len(codes)} codes")
+        except Exception as e:
+            code_status_message.set(f"Manual refresh failed: {e}")
 
     @reactive.effect
     @reactive.event(input.file)
