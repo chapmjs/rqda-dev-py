@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Dict
 
 from shiny import App, ui, reactive, render
+from sqlalchemy import text
 from db import get_engine, init_db, upsert_document, get_document, find_document_by_name, list_codes, create_code, insert_segment, list_segments
 
 # Configuration constants
@@ -123,15 +124,20 @@ def server(input, output, session):
     current_text = reactive.Value("")
     current_selection = reactive.Value(None)
     codes_list = reactive.Value([])  # Add reactive codes list
+    code_status_message = reactive.Value("")
 
     def refresh_codes():
         """Refresh the codes list"""
         try:
             codes = list_codes(engine)
+            print(f"DEBUG: Fetched {len(codes)} codes from database")  # Debug
+            for code in codes:
+                print(f"  - {code.get('name', 'Unknown')} (ID: {code.get('id', 'Unknown')})")  # Debug
             codes_list.set(codes)  # Update reactive value
             return codes
         except Exception as e:
             print(f"Error loading codes: {str(e)}")
+            codes_list.set([])  # Set empty list on error
             return []
 
     @output
@@ -139,7 +145,14 @@ def server(input, output, session):
     def code_select():
         """Render the code selection dropdown reactively"""
         codes = codes_list.get()
-        choices = [{"label": c["name"], "value": str(c["id"])} for c in codes]
+        print(f"DEBUG: Rendering dropdown with {len(codes)} codes")  # Debug
+        
+        if not codes:
+            choices = [{"label": "No codes available", "value": ""}]
+        else:
+            choices = [{"label": c["name"], "value": str(c["id"])} for c in codes]
+            print(f"DEBUG: Choices = {choices}")  # Debug
+            
         return ui.input_select("code", "Apply code", choices=choices)
 
     @reactive.effect
@@ -163,7 +176,7 @@ def server(input, output, session):
     @render.text
     def code_status():
         """Show code creation status"""
-        return ""
+        return code_status_message.get()
 
     @output
     @render.text
@@ -229,15 +242,43 @@ def server(input, output, session):
     def _add_code():
         """Add a new code"""
         name = (input.new_code() or "").strip()
+        
         if not name:
+            code_status_message.set("Please enter a code name")
             return
         
+        code_status_message.set(f"Creating code '{name}'...")
+        
         try:
-            create_code(engine, name)
-            refresh_codes()  # This will trigger the reactive update
+            # Test database connection first
+            code_status_message.set("Testing database connection...")
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT 1")).fetchone()
+                code_status_message.set("Database connection OK")
+            
+            # Try to create the code
+            code_status_message.set(f"Adding code '{name}' to database...")
+            code_id = create_code(engine, name)
+            code_status_message.set(f"Code '{name}' created with ID {code_id}")
+            
+            # Refresh the codes list
+            code_status_message.set("Refreshing codes list...")
+            codes = refresh_codes()
+            code_status_message.set(f"Found {len(codes)} total codes. Dropdown should update now.")
+            
+            # Clear the input
             ui.update_text("new_code", value="")
+            code_status_message.set(f"Success! Code '{name}' added. Check dropdown above.")
+            
         except Exception as e:
-            print(f"Error creating code: {e}")  # Debug output
+            error_msg = f"Error creating code: {str(e)}"
+            print(error_msg)  # Debug output to logs
+            code_status_message.set(error_msg)
+            
+            # Also try to get more specific error info
+            import traceback
+            print("Full traceback:")
+            print(traceback.format_exc())
 
     @reactive.effect
     @reactive.event(input.file)
