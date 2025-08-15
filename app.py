@@ -100,7 +100,7 @@ app_ui = ui.page_fluid(
             ui.input_action_button("add_code", "Add code", class_="btn-primary"),
             ui.output_text("code_status"),
             ui.tags.hr(),
-            ui.input_select("code", "Apply code", choices=[]),
+            ui.output_ui("code_select"),
             ui.input_action_button("apply", "Apply to selection", class_="btn-success"),
             ui.output_text("apply_status"),
             ui.tags.hr(),
@@ -122,15 +122,31 @@ def server(input, output, session):
     current_doc_id = reactive.Value(None)
     current_text = reactive.Value("")
     current_selection = reactive.Value(None)
+    codes_list = reactive.Value([])  # Add reactive codes list
 
     def refresh_codes():
-        """Refresh the codes dropdown"""
+        """Refresh the codes list"""
         try:
             codes = list_codes(engine)
-            choices = [{"label": c["name"], "value": str(c["id"])} for c in codes]
-            ui.update_select("code", choices=choices)
+            codes_list.set(codes)  # Update reactive value
+            return codes
         except Exception as e:
-            return f"Error loading codes: {str(e)}"
+            print(f"Error loading codes: {str(e)}")
+            return []
+
+    @output
+    @render.ui
+    def code_select():
+        """Render the code selection dropdown reactively"""
+        codes = codes_list.get()
+        choices = [{"label": c["name"], "value": str(c["id"])} for c in codes]
+        return ui.input_select("code", "Apply code", choices=choices)
+
+    @reactive.effect
+    def _update_code_choices():
+        """Update code dropdown when codes list changes"""
+        # This is no longer needed since we're using render.ui
+        pass
 
     @reactive.effect
     def _init():
@@ -218,10 +234,10 @@ def server(input, output, session):
         
         try:
             create_code(engine, name)
-            refresh_codes()
+            refresh_codes()  # This will trigger the reactive update
             ui.update_text("new_code", value="")
         except Exception as e:
-            pass  # Error handling simplified
+            print(f"Error creating code: {e}")  # Debug output
 
     @reactive.effect
     @reactive.event(input.file)
