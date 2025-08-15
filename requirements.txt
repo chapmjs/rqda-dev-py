@@ -1,3 +1,32 @@
-shiny>=1.0.0
-SQLAlchemy>=2.0.25
+# Core web framework
+shiny>=0.7.0
+
+# Database connectivity and ORM
+sqlalchemy>=2.0.0
 pymysql>=1.1.0
+cryptography>=41.0.0  # Required for PyMySQL SSL support
+
+# Text encoding detection
+chardet>=5.2.0
+
+# Development and debugging (optional but recommended)
+python-dotenv>=1.0.0  # For loading environment variables from .env file
+
+# Data processing utilities (for future enhancements)
+pandas>=2.0.0  # Optional: for data export features
+openpyxl>=3.1.0  # Optional: for Excel export
+
+# Testing (development only)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Linting and formatting (development only)
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Security scanning (development only)
+bandit>=1.7.0
+
+# Documentation (development only)
+sphinx>=7.0.0
