@@ -6,9 +6,16 @@ from pathlib import Path
 from typing import List, Dict
 
 from shiny import App, ui, reactive, render, session as shiny_session
-from werkzeug.utils import secure_filename
 
 from db import get_engine, init_db, upsert_document, get_document, find_document_by_name, list_codes, create_code, insert_segment, list_segments
+
+def secure_filename(name: str) -> str:
+    import os, re
+    name = name.replace("\\", "/").split("/")[-1]
+    name = re.sub(r'[^A-Za-z0-9._-]+', '_', name)
+    if name in ('', '.', '..'):
+        name = 'upload.txt'
+    return name[:200]
 
 #
 # --- Setup DB engine and ensure schema exists at startup ---
