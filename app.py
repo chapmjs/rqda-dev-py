@@ -57,7 +57,7 @@ def sniff_text(file_path: Path, filename: str) -> str:
 app_ui = ui.page_fluid(
     ui.h3("Mini QDA — Phase 0"),
     ui.layout_sidebar(
-        ui.panel_sidebar(
+        ui.sidebar(
             ui.input_file("file", "Upload a .txt file", accept=[".txt"]),
             ui.input_text("new_code", "New code name"),
             ui.input_action_button("add_code", "Add code"),
@@ -67,13 +67,8 @@ app_ui = ui.page_fluid(
             ui.input_text("open_filename", "Reload by filename (exact)"),
             ui.input_action_button("open", "Open document"),
         ),
-        ui.panel_main(
-            ui.tags.div(
-                {"id": "docview", "style": "white-space:pre-wrap; border:1px solid #ddd; padding:1rem; min-height:300px"},
-                "Upload a file to begin."
-            ),
-            ui.tags.div({"id":"selinfo", "style":"margin-top:0.5rem; color:#666;"}),
-        )
+        ui.tags.div({"id": "docview", "style": "white-space:pre-wrap; border:1px solid #ddd; padding:1rem; min-height:300px"}),
+        ui.tags.div({"id": "selinfo", "style": "margin-top:0.5rem; color:#666;"})
     ),
     # JS: capture selection within #docview and send offsets + text
     ui.tags.script("""
